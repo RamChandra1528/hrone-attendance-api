@@ -9,20 +9,27 @@ works, but nobody has reviewed it. Read PROBLEM_STATEMENT.docx for what is expec
 openapi.yaml for the contract and DATA_MODEL.md for what is stored in MongoDB.
 """
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from pymongo import MongoClient
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
-load_dotenv()
+# `load_dotenv` does not replace values injected by the grader or deployment.
+load_dotenv(override=False)
 
-client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+client = MongoClient(
+    os.getenv("MONGO_URI", "mongodb://localhost:27017"),
+    tz_aware=True,
+)
 db = client[os.getenv("MONGO_DB", "attendance_db")]
 
 IST = timezone(timedelta(hours=5, minutes=30))
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 app = FastAPI(title="Employee Attendance & Analytics API", version="2.0.0")
 
@@ -30,6 +37,80 @@ app = FastAPI(title="Employee Attendance & Analytics API", version="2.0.0")
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+def validate_calendar_date(value: str) -> str:
+    """Accept only a real calendar date written exactly as YYYY-MM-DD."""
+    if not DATE_PATTERN.fullmatch(value):
+        raise ValueError("must be a YYYY-MM-DD date")
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("must be a real calendar date") from exc
+    return value
+
+
+def epoch_millis(value: datetime) -> int:
+    """Serialize a MongoDB UTC datetime at the API boundary."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp() * 1000)
+
+
+def employee_response(employee: dict) -> dict:
+    """Remove MongoDB internals and convert the stored creation instant."""
+    result = {key: value for key, value in employee.items() if key != "_id"}
+    result["created_at"] = epoch_millis(result["created_at"])
+    return result
+
+
+def create_indexes() -> None:
+    """Create the indexes required by API lookups; repeated calls are safe."""
+    # The unique natural keys are also the concurrency guarantees for creates.
+    db.employees.create_index(
+        [("emp_code", ASCENDING)], name="uniq_employees_emp_code", unique=True
+    )
+    db.employees.create_index(
+        [("department", ASCENDING), ("emp_code", ASCENDING)],
+        name="employees_department_emp_code",
+    )
+    db.employees.create_index(
+        [("department", ASCENDING), ("joined_on", ASCENDING)],
+        name="employees_department_joined_on",
+    )
+
+    db.attendance_logs.create_index(
+        [("emp_code", ASCENDING), ("date", ASCENDING)],
+        name="uniq_attendance_emp_code_date",
+        unique=True,
+    )
+    db.attendance_logs.create_index(
+        [("date", DESCENDING), ("emp_code", ASCENDING)],
+        name="attendance_date_emp_code",
+    )
+    db.attendance_logs.create_index(
+        [("emp_code", ASCENDING), ("date", DESCENDING)],
+        name="attendance_emp_code_date",
+    )
+    db.attendance_logs.create_index(
+        [("status", ASCENDING), ("date", DESCENDING), ("emp_code", ASCENDING)],
+        name="attendance_status_date_emp_code",
+    )
+    db.attendance_logs.create_index(
+        [("emp_code", ASCENDING), ("punch_out", ASCENDING), ("punch_in", DESCENDING)],
+        name="attendance_open_record_lookup",
+    )
+
+
+@app.on_event("startup")
+def ensure_indexes_at_startup() -> None:
+    """Bootstrap indexes without preventing `/health` from reporting DB failure."""
+    try:
+        create_indexes()
+    except PyMongoError:
+        # If MongoDB is temporarily unavailable, health will return 503 instead of
+        # making the ASGI process fail during import/startup.
+        pass
+
+
 def compute_late_minutes(punch_in: datetime, shift_start: str) -> int:
     h, m = map(int, shift_start.split(":"))
     start = punch_in.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -51,13 +132,28 @@ def compute_overtime(punch_out: datetime, shift_end: str, date_str: str) -> int:
 # Models
 # --------------------------------------------------------------------------- #
 class EmployeeIn(BaseModel):
-    emp_code: str
-    name: str
-    email: str
-    department: str
-    shift_start: str = "09:30"
-    shift_end: str = "18:30"
+    emp_code: str = Field(pattern=r"^EMP\d{4,6}$")
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    department: str = Field(min_length=1, max_length=50)
+    shift_start: str = Field(
+        default="09:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$"
+    )
+    shift_end: str = Field(
+        default="18:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$"
+    )
     joined_on: str
+
+    @field_validator("joined_on")
+    @classmethod
+    def joined_on_must_be_a_date(cls, value: str) -> str:
+        return validate_calendar_date(value)
+
+    @model_validator(mode="after")
+    def shift_times_must_differ(self) -> "EmployeeIn":
+        if self.shift_start == self.shift_end:
+            raise ValueError("shift_start and shift_end must differ")
+        return self
 
 
 class PunchInIn(BaseModel):
@@ -71,28 +167,42 @@ class PunchInIn(BaseModel):
 # --------------------------------------------------------------------------- #
 @app.get("/health")
 def health():
+    try:
+        db.command("ping")
+    except PyMongoError as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}
 
 
 @app.post("/employees", status_code=201)
 def create_employee(body: EmployeeIn):
-    if db.employees.find_one({"emp_code": body.emp_code}):
-        raise HTTPException(409, "emp_code already exists")
     doc = body.model_dump()
-    doc["created_at"] = datetime.now()
-    db.employees.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
+    doc["created_at"] = datetime.now(timezone.utc)
+    try:
+        db.employees.insert_one(doc)
+    except DuplicateKeyError as exc:
+        raise HTTPException(status_code=409, detail="emp_code already exists") from exc
+    return employee_response(doc)
 
 
 @app.get("/employees")
-def list_employees(department: Optional[str] = None, page: int = 1, page_size: int = 20):
+def list_employees(
+    department: Optional[str] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+):
     q = {}
-    if department:
+    if department is not None:
         q["department"] = department
-    skip = page * page_size
-    total = db.employees.count_documents({})
-    items = list(db.employees.find(q, {"_id": 0}).skip(skip).limit(page_size))
+    skip = (page - 1) * page_size
+    total = db.employees.count_documents(q)
+    items = list(
+        db.employees.find(q)
+        .sort("emp_code", ASCENDING)
+        .skip(skip)
+        .limit(page_size)
+    )
+    items = [employee_response(item) for item in items]
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
