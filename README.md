@@ -1,26 +1,31 @@
-# Candidate kit
+# Employee Attendance and Analytics API
 
-Read in this order:
+FastAPI and MongoDB implementation of the HROne attendance assignment. The API contract is in `openapi.yaml`; MongoDB document shapes are in `DATA_MODEL.md`.
 
-1. `PROBLEM_STATEMENT.docx`: what you are asked to do, how it is evaluated.
-2. `openapi.yaml`: the API contract and the business rules (R1 - R10).
-3. `DATA_MODEL.md`: what is stored in MongoDB, with nine sample documents.
-4. `app/main.py`: the starter. Put **all** your code in this one file. It must start with `uvicorn app.main:app --port 8000`.
-5. `REVIEW.md`, `DECISIONS.md`: templates to fill in.
+## Run locally
 
-`sample_data/` holds the nine sample documents as MongoDB Extended JSON; `sample_seed.py` loads them. The grader's dataset is
-much larger and contains cases they do not show.
+MongoDB 6.0+ must be running. Python 3.11+ is required.
 
-## Local setup
-```bash
-python -m venv .venv && source .venv/bin/activate
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env            # set MONGO_URI / MONGO_DB (local docker: docker run -p 27017:27017 mongo:7)
+Copy-Item .env.example .env
 python sample_seed.py
-uvicorn app.main:app --port 8000 --reload
+uvicorn app.main:app --port 8000
 ```
-MongoDB **6.0 or newer** is required (the grader uses 7.0). MongoDB Atlas free tier (M0) works.
 
-## Submit
-A public Git repository with `app/main.py`, `requirements.txt`, `REVIEW.md`, `DECISIONS.md` and a short `README.md`.
-No `.env`, no secrets, no Dockerfile.
+`MONGO_URI` and `MONGO_DB` can be set as real environment variables; they take precedence over `.env`. The supplied seed command deletes and reloads only `employees` and `attendance_logs`, so use it only against a disposable local database.
+
+OpenAPI documentation is available while running at `http://127.0.0.1:8000/docs`.
+
+## Implemented behavior
+
+- Readiness ping and idempotent MongoDB index creation at startup.
+- Employee creation/listing with validation, pagination, sorting, and duplicate-safe writes.
+- Punch-in, punch-out, IST/overnight shifts, half-up work-hour rounding, and concurrent request protection.
+- Attendance listing and audited manual corrections.
+- Monthly employee, department, leaderboard, and daily-trend analytics implemented with MongoDB aggregation pipelines.
+- `GET /admin/explain/{endpoint}` for execution-statistics explain output of each main list/analytics query.
+
+The sample files demonstrate document shape only. The application is designed for the larger grader dataset and creates its own indexes at startup. Never commit `.env` or credentials.
