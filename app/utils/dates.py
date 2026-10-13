@@ -16,7 +16,6 @@ def validate_calendar_date(value: str) -> str:
         raise ValueError("must be a real calendar date") from exc
     return value
 
-
 def epoch_millis(value: datetime) -> int:
     """Serialize a MongoDB UTC datetime at the API boundary."""
     if value.tzinfo is None:
@@ -95,4 +94,3 @@ def month_bounds(month: str) -> tuple[str, str, str]:
         (next_start - timedelta(days=1)).date().isoformat(),
         next_start.date().isoformat(),
     )
-

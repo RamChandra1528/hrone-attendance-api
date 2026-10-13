@@ -13,4 +13,3 @@ def health():
     except PyMongoError as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}
-

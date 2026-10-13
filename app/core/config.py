@@ -19,4 +19,3 @@ EpochMillis = Annotated[StrictInt, Field(ge=100000000000, le=4102444800000)]
 Status = Literal["PRESENT", "ABSENT", "LEAVE", "WFH", "ON_DUTY"]
 PresenceStatus = Literal["PRESENT", "WFH", "ON_DUTY"]
 PRESENCE_STATUSES = ["PRESENT", "WFH", "ON_DUTY"]
-

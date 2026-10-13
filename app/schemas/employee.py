@@ -26,4 +26,3 @@ class EmployeeIn(BaseModel):
         if self.shift_start == self.shift_end:
             raise ValueError("shift_start and shift_end must differ")
         return self
-

@@ -86,4 +86,3 @@ def explain_endpoint(
         verbosity="executionStats",
     )
     return {"endpoint": endpoint, "collection": collection, "explain": explain}
-

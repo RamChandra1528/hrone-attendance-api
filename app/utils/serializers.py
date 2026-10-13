@@ -7,7 +7,6 @@ def employee_response(employee: dict) -> dict:
     result["created_at"] = epoch_millis(result["created_at"])
     return result
 
-
 def attendance_response(record: dict) -> dict:
     """Convert BSON dates and legacy optional fields to the attendance API shape."""
     result = {key: value for key, value in record.items() if key != "_id"}
@@ -40,4 +39,3 @@ def attendance_response(record: dict) -> dict:
         history.append(serialized_entry)
     result["history"] = history
     return result
-

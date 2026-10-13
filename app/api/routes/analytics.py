@@ -42,7 +42,6 @@ def late_leaderboard(
         "items": list(db.attendance_logs.aggregate(late_leaderboard_pipeline(month, limit, department))),
     }
 
-
 @router.get("/departments/{department}/trend")
 def department_trend(
     department: str,
@@ -62,4 +61,3 @@ def department_trend(
         "department": department,
         "items": list(db.employees.aggregate(department_trend_pipeline(department, date_from, date_to))),
     }
-

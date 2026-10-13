@@ -37,4 +37,3 @@ def compute_overtime(
     )
     elapsed_minutes = max(0, elapsed_seconds // 60)
     return elapsed_minutes if elapsed_minutes >= 30 else 0
-

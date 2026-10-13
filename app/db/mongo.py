@@ -23,7 +23,6 @@ def create_indexes() -> None:
     db.employees.create_index(
         [("joined_on", ASCENDING)], name="employees_joined_on"
     )
-
     db.attendance_logs.create_index(
         [("emp_code", ASCENDING), ("date", ASCENDING)],
         name="uniq_attendance_emp_code_date",
@@ -49,4 +48,3 @@ def create_indexes() -> None:
         [("emp_code", ASCENDING), ("punch_in", DESCENDING)],
         name="attendance_emp_code_punch_in",
     )
-

@@ -42,4 +42,3 @@ def list_employees(
     )
     items = [employee_response(item) for item in items]
     return {"items": items, "total": total, "page": page, "page_size": page_size}
-
