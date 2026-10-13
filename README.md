@@ -19,6 +19,21 @@ uvicorn app.main:app --port 8000
 
 OpenAPI documentation is available while running at `http://127.0.0.1:8000/docs`.
 
+## Project structure
+
+```text
+app/
+├── main.py                 # FastAPI application assembly
+├── api/routes/             # HTTP endpoints grouped by feature
+├── core/config.py          # Environment settings and shared constants
+├── db/mongo.py             # Mongo client, database handle, and indexes
+├── schemas/                # Pydantic request models
+├── services/               # Attendance rules and analytics pipelines
+└── utils/                  # Date/time and response serialization helpers
+```
+
+`main.py` intentionally contains only application setup and router registration. Business logic and database concerns live in their respective modules.
+
 ## Implemented behavior
 
 - Readiness ping and idempotent MongoDB index creation at startup.
